@@ -1,5 +1,5 @@
 ---
-name: clear-explan
+name: clear-explain
 description: Use when the user asks to see a plan or design overview, or asks how a symbol, command, or event actually moves in this repo—who calls it, whether it is a network packet, what the other side receives. Also use when a prior explanation used stage numbers or layer names the reader cannot expand into an action. User-triggered only, never auto-injected.
 ---
 
