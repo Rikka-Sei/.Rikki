@@ -1,0 +1,19 @@
+.direnv/
+.tmp/
+
+# Python 字节码
+__pycache__/
+*.pyc
+
+# macOS 元数据
+.DS_Store
+._*
+__MACOSX/
+.AppleDouble/
+.LSOverride
+.Spotlight-V100/
+.Trashes/
+.fseventsd/
+.TemporaryItems/
+.DocumentRevisions-V100/
+.apdisk
