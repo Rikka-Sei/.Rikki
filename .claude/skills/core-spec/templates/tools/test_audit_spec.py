@@ -193,6 +193,73 @@ class AuditTemplateSelfTest(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         self.assertIn("手绘 stateDiagram", completed.stdout + completed.stderr)
 
+    def test_generated_oracle_state_diagram_passes(self):
+        spec = VALID_SPEC.replace(
+            "状态机文本。",
+            "状态机文本。\n<!-- ORACLE:auth BEGIN -->\n```haskell\nmodule Oracle where\n```\n"
+            "<!-- ORACLE:auth END -->\n```ORACLE-LABEL:auth\nstate Idle = 空闲\n```\n"
+            "<!-- RENDERED-ORACLE:auth BEGIN -->\n```mermaid\nstateDiagram-v2\n"
+            "    [*] --> Idle\n```\n<!-- RENDERED-ORACLE:auth END -->",
+        )
+        with self._fixture(spec_text=spec) as (_, tmp, manifest_path):
+            completed = _run(tmp, manifest_path)
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+
+    def test_oracle_state_diagram_requires_matching_semantics_and_label(self):
+        diagram = ("<!-- RENDERED-ORACLE:auth BEGIN -->\n```mermaid\nstateDiagram-v2\n"
+                   "    [*] --> Idle\n```\n<!-- RENDERED-ORACLE:auth END -->")
+        for other in ("", "<!-- ORACLE:auth BEGIN -->\n",
+                      "```ORACLE-LABEL:auth\nstate Idle = 空闲\n```\n",
+                      "<!-- ORACLE:auth BEGIN -->\n```ORACLE-LABEL:auth\nstate Idle = 空闲\n```\n"):
+            with self.subTest(other=other):
+                spec = VALID_SPEC.replace("状态机文本。", "状态机文本。\n" + other + diagram)
+                with self._fixture(spec_text=spec) as (_, tmp, manifest_path):
+                    completed = _run(tmp, manifest_path)
+                self.assertNotEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+
+    def test_legacy_semantics_marker_accepts_whitespace(self):
+        diagram = ("<!--  SEMANTICS:auth BEGIN -->\n```haskell\nmodule Semantics where\n```\n"
+                   "<!-- SEMANTICS:auth END -->\n```LABEL:auth\nstate Idle = 空闲\n```\n"
+                   "<!-- RENDERED:auth BEGIN -->\n```mermaid\nstateDiagram-v2\n"
+                   "    [*] --> Idle\n```\n<!-- RENDERED:auth END -->")
+        spec = VALID_SPEC.replace("状态机文本。", "状态机文本。\n" + diagram)
+        with self._fixture(spec_text=spec) as (_, tmp, manifest_path):
+            completed = _run(tmp, manifest_path)
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+
+    def test_duplicate_rendered_oracle_is_rejected(self):
+        diagram = ("<!-- RENDERED-ORACLE:auth BEGIN -->\n```mermaid\nstateDiagram-v2\n"
+                   "    [*] --> Idle\n```\n<!-- RENDERED-ORACLE:auth END -->")
+        prefix = ("<!-- ORACLE:auth BEGIN -->\n```haskell\nmodule Oracle where\n```\n"
+                  "<!-- ORACLE:auth END -->\n```ORACLE-LABEL:auth\nstate Idle = 空闲\n```\n")
+        spec = VALID_SPEC.replace("状态机文本。", "状态机文本。\n" + prefix + diagram + "\n" + diagram)
+        with self._fixture(spec_text=spec) as (_, tmp, manifest_path):
+            completed = _run(tmp, manifest_path)
+        self.assertNotEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn("生成围栏重复", completed.stdout + completed.stderr)
+
+    def test_rendered_oracle_rejects_multiple_diagrams_in_one_block(self):
+        diagram = ("<!-- ORACLE:auth BEGIN -->\n```haskell\nmodule Oracle where\n```\n"
+                   "<!-- ORACLE:auth END -->\n```ORACLE-LABEL:auth\nstate Idle = 空闲\n```\n"
+                   "<!-- RENDERED-ORACLE:auth BEGIN -->\n```mermaid\nstateDiagram-v2\n```\n"
+                   "```mermaid\nstateDiagram-v2\n```\n<!-- RENDERED-ORACLE:auth END -->")
+        spec = VALID_SPEC.replace("状态机文本。", "状态机文本。\n" + diagram)
+        with self._fixture(spec_text=spec) as (_, tmp, manifest_path):
+            completed = _run(tmp, manifest_path)
+        self.assertNotEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn("必须只包含一个 Mermaid 围栏", completed.stdout + completed.stderr)
+
+    def test_rendered_oracle_rejects_empty_then_nonempty_diagram(self):
+        diagram = ("<!-- ORACLE:auth BEGIN -->\n```haskell\nmodule Oracle where\n```\n"
+                   "<!-- ORACLE:auth END -->\n```ORACLE-LABEL:auth\nstate Idle = 空闲\n```\n"
+                   "<!-- RENDERED-ORACLE:auth BEGIN -->\n```mermaid\n```\n"
+                   "```mermaid\nstateDiagram-v2\n```\n<!-- RENDERED-ORACLE:auth END -->")
+        spec = VALID_SPEC.replace("状态机文本。", "状态机文本。\n" + diagram)
+        with self._fixture(spec_text=spec) as (_, tmp, manifest_path):
+            completed = _run(tmp, manifest_path)
+        self.assertNotEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn("必须只包含一个 Mermaid 围栏", completed.stdout + completed.stderr)
+
     def test_stale_decision_range_fails(self):
         spec = VALID_SPEC.replace("| D01 | 示例决策 |", "| D01–D24 覆盖声明 |")
         with self._fixture(spec_text=spec) as (_, tmp, manifest_path):

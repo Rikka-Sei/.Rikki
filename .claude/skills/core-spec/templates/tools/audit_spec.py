@@ -228,33 +228,48 @@ def _mask_fenced_blocks(text: str) -> str:
 
 
 def _check_state_diagrams(raw_text: str) -> list[str]:
-    """stateDiagram 必须落在 RENDERED 围栏内，且围栏名有同名 SEMANTICS 与 LABEL。
+    """stateDiagram 必须落在同名语义及标签对应的生成围栏内。
 
     flowchart 等非状态图不检查。检查用未掩码原文，因为术语扫描会抹掉围栏内容。
     """
     errors: list[str] = []
     rendered = list(re.finditer(
-        r"<!--\s*RENDERED:(\S+)\s+BEGIN\s*-->(.*?)<!--\s*RENDERED:\1\s+END\s*-->",
+        r"<!--\s*(RENDERED|RENDERED-ORACLE):(\S+)\s+BEGIN\s*-->(.*?)<!--\s*\1:\2\s+END\s*-->",
         raw_text,
         re.DOTALL,
     ))
-    spans = [(m.start(), m.end(), m.group(1)) for m in rendered]
+    spans = [(m.start(), m.end(), m.group(1), m.group(2)) for m in rendered]
     fence_re = re.compile(
-        r"^ {0,3}(`{3,})mermaid[^\n]*\n(.*?)\n {0,3}\1[ \t]*$",
+        r"^ {0,3}(`{3,})mermaid[^\n]*\n((?:(?! {0,3}\1[ \t]*$)[^\n]*\n)*) {0,3}\1[ \t]*$",
         re.DOTALL | re.MULTILINE,
     )
+    seen: set[tuple[str, str]] = set()
+    for block in rendered:
+        kind, name = block.group(1), block.group(2)
+        if (kind, name) in seen:
+            errors.append(f"{kind}:{name} 生成围栏重复")
+        seen.add((kind, name))
+        contents = list(fence_re.finditer(block.group(3)))
+        if len(contents) != 1 or contents[0].group(0).strip() != block.group(3).strip():
+            errors.append(f"{kind}:{name} 必须只包含一个 Mermaid 围栏")
     for fence in fence_re.finditer(raw_text):
         if not re.search(r"stateDiagram", fence.group(2)):
             continue
-        if any(start <= fence.start() < end for start, end, _ in spans):
+        if any(start <= fence.start() < end for start, end, _, _ in spans):
             continue
         line = raw_text[:fence.start()].count("\n") + 1
         errors.append(f"手绘 stateDiagram 不在 RENDERED 围栏内（第 {line} 行）")
-    for _, _, name in spans:
-        if f"SEMANTICS:{name}" not in raw_text:
-            errors.append(f"RENDERED:{name} 没有同名 SEMANTICS 块")
-        if f"LABEL:{name}" not in raw_text:
-            errors.append(f"RENDERED:{name} 没有同名 LABEL 块")
+    for _, _, kind, name in spans:
+        semantic = "SEMANTICS" if kind == "RENDERED" else "ORACLE"
+        label = "LABEL" if kind == "RENDERED" else "ORACLE-LABEL"
+        semantic_block = (r"<!--\s*" + semantic + ":" + re.escape(name) +
+                          r"\s+BEGIN\s*-->\s*\n```haskell[ \t]*\n.*?^```[ \t]*\n\s*"
+                          r"<!--\s*" + semantic + ":" + re.escape(name) + r"\s+END\s*-->")
+        if not re.search(semantic_block, raw_text, re.DOTALL | re.MULTILINE):
+            errors.append(f"{kind}:{name} 没有同名 {semantic} 块")
+        label_block = r"^```" + label + ":" + re.escape(name) + r"[ \t]*\n.*?^```[ \t]*$"
+        if not re.search(label_block, raw_text, re.DOTALL | re.MULTILINE):
+            errors.append(f"{kind}:{name} 没有同名 {label} 块")
     return errors
 
 
